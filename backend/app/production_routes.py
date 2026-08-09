@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from .database import get_db
 from .models import AuditLog, Competitor, ContentItem, ContentPlan, InstagramMetric, Prediction, Video, User, Workspace, InstagramAccount, VideoAnalysis, AnalysisJob
 from .security import hash_ip, rate_limit
+from .auth import identity, require_workspace
+from .rbac import authorize_resource, authorize_content_item
 from .schemas import VideoContext
 from .video import validate_upload, probe_video, VideoValidationError
 from .storage import get_storage
