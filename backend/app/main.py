@@ -32,6 +32,7 @@ from .store import analysis_store
 from .video import VideoValidationError, probe_video, validate_upload
 from .production_routes import router as production_router
 from .payment_routes import router as payment_router
+from .secure_routes import router as secure_router
 
 SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -64,6 +65,7 @@ app.add_middleware(
 )
 app.include_router(production_router)
 app.include_router(payment_router)
+app.include_router(secure_router)
 
 
 def schedule(job_id: str) -> None:
