@@ -1,6 +1,10 @@
 """Signed Bearer identity and workspace RBAC boundary (HMAC JWT-like compact tokens)."""
 from __future__ import annotations
-import base64,json,hmac,hashlib,time
+import base64
+import json
+import hmac
+import hashlib
+import time
 from fastapi import Header,HTTPException
 from sqlalchemy.orm import Session
 from .config import settings

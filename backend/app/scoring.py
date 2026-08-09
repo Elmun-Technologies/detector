@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from collections.abc import Mapping
 
-from .schemas import AccountProfile, ScoreBreakdown, VideoContext
+from .schemas import ScoreBreakdown, VideoContext
 
 
 BASE_WEIGHTS: dict[str, float] = {

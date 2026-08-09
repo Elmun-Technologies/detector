@@ -6,7 +6,6 @@ from .auth import identity,require_workspace
 from .database import get_db
 from .payment_providers import provider
 from .billing import transition_payment
-from .models import Subscription
 router=APIRouter(prefix='/v1')
 class CheckoutIn(BaseModel): amount:int=Field(gt=0);currency:str='UZS';provider:str
 @router.post('/workspaces/{workspace_id}/payments/checkout',status_code=201)
