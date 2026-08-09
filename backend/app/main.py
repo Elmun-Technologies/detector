@@ -9,6 +9,7 @@ from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status, Depends
 from .auth import identity
+from .legacy import development_legacy_only
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
@@ -93,8 +94,8 @@ async def health() -> dict[str, str]:
     tags=["analysis"],
     summary="Start a context-based analysis",
 )
-async def create_analysis(payload: CreateAnalysisRequest) -> AnalysisJob:
-    """Create an async analysis from a Mini App or manual data entry."""
+async def create_analysis(payload: CreateAnalysisRequest, _: None = Depends(development_legacy_only)) -> AnalysisJob:
+    """Development-only compatibility endpoint; production uses persisted workspace upload."""
     job = analysis_store.create(payload.context, payload.source_filename)
     schedule(job.id)
     return job
@@ -110,6 +111,7 @@ async def create_analysis(payload: CreateAnalysisRequest) -> AnalysisJob:
 async def upload_analysis(
     file: Annotated[UploadFile, File(description="MP4, MOV or AVI, 500 MB maximum")],
     context: Annotated[str, Form(description="Serialized VideoContext JSON")],
+    _: None = Depends(development_legacy_only),
 ) -> AnalysisJob:
     parsed_context = parse_context(context)
     original_name = file.filename or "video.mp4"
@@ -157,7 +159,7 @@ async def upload_analysis(
 
 
 @app.get("/v1/analyses/{job_id}", response_model=AnalysisJob, tags=["analysis"])
-async def get_analysis(job_id: str) -> AnalysisJob:
+async def get_analysis(job_id: str, _: None = Depends(development_legacy_only)) -> AnalysisJob:
     job = analysis_store.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Tahlil topilmadi.")
