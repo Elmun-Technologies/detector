@@ -7,31 +7,73 @@ services:
   redis:
     image: redis:7-alpine
     command: redis-server --appendonly yes
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 20 }
     volumes: [redis_data:/data]
   minio:
     image: minio/minio:latest
     profiles: [s3]
     command: server /data --console-address :9001
     environment: { MINIO_ROOT_USER: minioadmin, MINIO_ROOT_PASSWORD: minioadmin }
+    healthcheck: { test: ["CMD", "mc", "ready", "local"], interval: 5s, timeout: 3s, retries: 20 }
+    ports: ["9000:9000", "9001:9001"]
     volumes: [minio_data:/data]
+  # One-shot bootstrap: private bucket + no anonymous access.
+  minio-init:
+    image: minio/mc:latest
+    profiles: [s3]
+    depends_on: { minio: { condition: service_healthy } }
+    entrypoint: >
+      sh -c "mc alias set local http://minio:9000 minioadmin minioadmin &&
+             mc mb --ignore-existing local/viral-media &&
+             mc anonymous set none local/viral-media"
   api:
     build: ./backend
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     env_file: .env
-    environment: { DATABASE_URL: postgresql+psycopg://viral:viral@postgres:5432/viral, REDIS_URL: redis://redis:6379/0, UPLOADS_DIR: /data/uploads }
+    environment:
+      DATABASE_URL: postgresql+psycopg://viral:viral@postgres:5432/viral
+      REDIS_URL: redis://redis:6379/0
+      UPLOADS_DIR: /data/uploads
+      QUEUE_MODE: celery
+      # Used only when STORAGE_BACKEND=s3 (start the compose `s3` profile first).
+      S3_ENDPOINT: http://minio:9000
+      S3_FORCE_PATH_STYLE: "true"
     ports: ["8000:8000"]
     volumes: [viral_uploads:/data/uploads]
-    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_started } }
+    healthcheck: { test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/ready').read()\""], interval: 15s, timeout: 5s, retries: 10, start_period: 30s }
+    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
   worker:
     build: ./backend
-    command: celery -A app.celery_app.celery worker -l info -Q analysis
+    # Media work is CPU bound: prefork, one task at a time, late acknowledgement.
+    command: celery -A app.celery_app.celery worker -l info -Q analysis --concurrency 2 --prefetch-multiplier 1
     env_file: .env
-    environment: { DATABASE_URL: postgresql+psycopg://viral:viral@postgres:5432/viral, REDIS_URL: redis://redis:6379/0 }
-    depends_on: [postgres, redis]
+    environment:
+      DATABASE_URL: postgresql+psycopg://viral:viral@postgres:5432/viral
+      REDIS_URL: redis://redis:6379/0
+      UPLOADS_DIR: /data/uploads
+      QUEUE_MODE: celery
+      S3_ENDPOINT: http://minio:9000
+      S3_FORCE_PATH_STYLE: "true"
+    volumes: [viral_uploads:/data/uploads]
+    healthcheck: { test: ["CMD-SHELL", "celery -A app.celery_app.celery inspect ping -d celery@$$HOSTNAME"], interval: 30s, timeout: 10s, retries: 5, start_period: 30s }
+    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
+  # Scheduler for stuck-job recovery and expired media artifact cleanup.
+  beat:
+    build: ./backend
+    command: celery -A app.celery_app.celery beat -l info
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://viral:viral@postgres:5432/viral
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_MODE: celery
+    depends_on: { redis: { condition: service_healthy } }
   bot:
     build: ./backend
     command: python -m app.bot
     env_file: .env
-    environment: { DATABASE_URL: postgresql+psycopg://viral:viral@postgres:5432/viral, REDIS_URL: redis://redis:6379/0 }
+    environment:
+      DATABASE_URL: postgresql+psycopg://viral:viral@postgres:5432/viral
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_MODE: celery
     depends_on: [api]
 volumes: { postgres_data: {}, redis_data: {}, minio_data: {}, viral_uploads: {} }
