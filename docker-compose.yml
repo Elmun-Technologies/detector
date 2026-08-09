@@ -1,28 +1,37 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_DB: viral, POSTGRES_USER: viral, POSTGRES_PASSWORD: viral }
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U viral"], interval: 5s, timeout: 3s, retries: 20 }
+    volumes: [postgres_data:/var/lib/postgresql/data]
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes: [redis_data:/data]
+  minio:
+    image: minio/minio:latest
+    profiles: [s3]
+    command: server /data --console-address :9001
+    environment: { MINIO_ROOT_USER: minioadmin, MINIO_ROOT_PASSWORD: minioadmin }
+    volumes: [minio_data:/data]
   api:
-    build:
-      context: ./backend
-    environment:
-      ENVIRONMENT: development
-      UPLOADS_DIR: /data/uploads
-      CORS_ORIGINS: http://localhost:5173
-    ports:
-      - "8000:8000"
-    volumes:
-      - viral_uploads:/data/uploads
-
+    build: ./backend
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    env_file: .env
+    environment: { DATABASE_URL: postgresql+psycopg://viral:viral@postgres:5432/viral, REDIS_URL: redis://redis:6379/0, UPLOADS_DIR: /data/uploads }
+    ports: ["8000:8000"]
+    volumes: [viral_uploads:/data/uploads]
+    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_started } }
+  worker:
+    build: ./backend
+    command: celery -A app.celery_app.celery worker -l info -Q analysis
+    env_file: .env
+    environment: { DATABASE_URL: postgresql+psycopg://viral:viral@postgres:5432/viral, REDIS_URL: redis://redis:6379/0 }
+    depends_on: [postgres, redis]
   bot:
-    build:
-      context: ./backend
+    build: ./backend
     command: python -m app.bot
-    environment:
-      ENVIRONMENT: development
-      UPLOADS_DIR: /data/uploads
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in your environment or .env file}
-    volumes:
-      - viral_uploads:/data/uploads
-    depends_on:
-      - api
-
-volumes:
-  viral_uploads:
+    env_file: .env
+    environment: { DATABASE_URL: postgresql+psycopg://viral:viral@postgres:5432/viral, REDIS_URL: redis://redis:6379/0 }
+    depends_on: [api]
+volumes: { postgres_data: {}, redis_data: {}, minio_data: {}, viral_uploads: {} }

@@ -3,3 +3,10 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 pydantic==2.10.4
 aiogram==3.17.0
+SQLAlchemy==2.0.36
+alembic==1.14.0
+psycopg[binary]==3.2.3
+celery[redis]==5.4.0
+redis==5.2.1
+boto3==1.35.84
+cryptography==44.0.0

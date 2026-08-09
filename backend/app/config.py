@@ -1,30 +1,13 @@
 from __future__ import annotations
-
 import os
 from dataclasses import dataclass
 from pathlib import Path
-
-
 @dataclass(frozen=True)
 class Settings:
-    """Runtime configuration read once at application startup.
-
-    Secrets are intentionally read from environment variables only. Keep the
-    token out of source control and use a managed secret store in production.
-    """
-
-    app_name: str = "Viral Video AI API"
-    environment: str = os.getenv("ENVIRONMENT", "development")
-    telegram_bot_token: str | None = os.getenv("TELEGRAM_BOT_TOKEN")
-    telegram_webhook_secret: str | None = os.getenv("TELEGRAM_WEBHOOK_SECRET")
-    max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_BYTES", str(500 * 1024 * 1024)))
-    max_duration_seconds: float = float(os.getenv("MAX_DURATION_SECONDS", "180"))
-    uploads_dir: Path = Path(os.getenv("UPLOADS_DIR", "./data/uploads"))
-    allowed_origins: tuple[str, ...] = tuple(
-        origin.strip()
-        for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
-        if origin.strip()
-    )
-
-
-settings = Settings()
+ app_name:str='Viral Video AI API'; environment:str=os.getenv('ENVIRONMENT','development')
+ database_url:str=os.getenv('DATABASE_URL','sqlite:///./data/viral.db'); redis_url:str=os.getenv('REDIS_URL','redis://redis:6379/0')
+ telegram_bot_token:str|None=os.getenv('TELEGRAM_BOT_TOKEN'); telegram_webhook_secret:str|None=os.getenv('TELEGRAM_WEBHOOK_SECRET'); telegram_webapp_secret:str|None=os.getenv('TELEGRAM_WEBAPP_SECRET')
+ encryption_key:str|None=os.getenv('ENCRYPTION_KEY'); storage_backend:str=os.getenv('STORAGE_BACKEND','local'); uploads_dir:Path=Path(os.getenv('UPLOADS_DIR','./data/uploads')); s3_bucket:str=os.getenv('S3_BUCKET','viral-private'); s3_endpoint:str|None=os.getenv('S3_ENDPOINT'); s3_access_key:str|None=os.getenv('S3_ACCESS_KEY'); s3_secret_key:str|None=os.getenv('S3_SECRET_KEY')
+ max_upload_bytes:int=int(os.getenv('MAX_UPLOAD_BYTES',str(500*1024*1024))); max_duration_seconds:float=float(os.getenv('MAX_DURATION_SECONDS','180')); rate_limit_per_minute:int=int(os.getenv('RATE_LIMIT_PER_MINUTE','60'))
+ allowed_origins:tuple[str,...]=tuple(x.strip() for x in os.getenv('CORS_ORIGINS','http://localhost:5173').split(',') if x.strip())
+settings=Settings()

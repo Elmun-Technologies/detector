@@ -9,7 +9,12 @@ from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+from .database import Base, engine, get_db
+from .models import ContentPlan, ContentItem, Competitor, InstagramMetric, Prediction, Video, AuditLog, User, Workspace
+from .security import rate_limit, hash_ip
 
 from .analyzer import check_idea
 from .config import settings
@@ -23,6 +28,7 @@ from .schemas import (
 )
 from .store import analysis_store
 from .video import VideoValidationError, probe_video, validate_upload
+from .production_routes import router as production_router
 
 SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -30,6 +36,8 @@ SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+    # Useful for local/dev. Deployments run Alembic before serving traffic.
+    Base.metadata.create_all(bind=engine)
     yield
 
 
@@ -46,9 +54,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.allowed_origins),
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
+app.include_router(production_router)
 
 
 def schedule(job_id: str) -> None:
