@@ -5,7 +5,9 @@ from app import models  # noqa
 from app.config import settings
 
 config = context.config
-config.set_main_option('sqlalchemy.url', settings.database_url)
+# CLI/CI may override sqlalchemy.url; default to runtime configuration.
+if not config.get_main_option('sqlalchemy.url'):
+    config.set_main_option('sqlalchemy.url', settings.database_url)
 target_metadata = Base.metadata
 
 def run_migrations_offline():

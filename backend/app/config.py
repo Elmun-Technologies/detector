@@ -11,6 +11,8 @@ class Settings:
     redis_url: str = os.getenv('REDIS_URL', 'redis://redis:6379/0')
     queue_mode: str = os.getenv('QUEUE_MODE', 'inline')
     jwt_secret: str | None = os.getenv('JWT_SECRET')
+    jwt_issuer: str = os.getenv('JWT_ISSUER', 'viral-video-ai')
+    jwt_audience: str = os.getenv('JWT_AUDIENCE', 'viral-dashboard')
     admin_api_key: str | None = os.getenv('ADMIN_API_KEY')
     telegram_bot_token: str | None = os.getenv('TELEGRAM_BOT_TOKEN')
     telegram_webhook_secret: str | None = os.getenv('TELEGRAM_WEBHOOK_SECRET')

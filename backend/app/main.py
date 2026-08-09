@@ -7,7 +7,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status, Depends
+from .auth import identity
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
@@ -73,6 +74,10 @@ def parse_context(raw_context: str) -> VideoContext:
     except Exception as error:
         raise HTTPException(status_code=422, detail="context JSON noto‘g‘ri formatda.") from error
 
+
+@app.get('/v1/auth/session', tags=['auth'])
+async def session_check(user_id: str = Depends(identity)) -> dict[str, str]:
+    return {'user_id': user_id}
 
 @app.get("/health", tags=["system"])
 async def health() -> dict[str, str]:

@@ -16,6 +16,14 @@ class User(IdTime, Base):
     __tablename__='users'; telegram_id: Mapped[str|None]=mapped_column(String(32), unique=True); phone: Mapped[str|None]=mapped_column(String(32)); locale: Mapped[str]=mapped_column(String(12),default='uz'); deleted_at: Mapped[datetime|None]=mapped_column(DateTime(timezone=True)); workspaces=relationship('Workspace',back_populates='owner')
 class Workspace(IdTime, Base):
     __tablename__='workspaces'; owner_id: Mapped[str]=mapped_column(ForeignKey('users.id')); name: Mapped[str]=mapped_column(String(160)); plan: Mapped[str]=mapped_column(String(20),default='free'); industry: Mapped[str|None]=mapped_column(String(120)); audience: Mapped[str|None]=mapped_column(Text); objective: Mapped[str|None]=mapped_column(String(80)); region: Mapped[str|None]=mapped_column(String(80)); owner=relationship('User',back_populates='workspaces')
+class WorkspaceMember(IdTime, Base):
+    __tablename__='workspace_members'; workspace_id: Mapped[str]=mapped_column(ForeignKey('workspaces.id')); user_id: Mapped[str]=mapped_column(ForeignKey('users.id')); role: Mapped[str]=mapped_column(String(16),default='viewer'); __table_args__=(UniqueConstraint('workspace_id','user_id'),)
+class Role(IdTime, Base):
+    __tablename__='roles'; name: Mapped[str]=mapped_column(String(32),unique=True); permissions: Mapped[dict]=mapped_column(JSON,default=dict)
+class Subscription(IdTime, Base):
+    __tablename__='subscriptions'; workspace_id: Mapped[str]=mapped_column(ForeignKey('workspaces.id'),unique=True); plan: Mapped[str]=mapped_column(String(20),default='free'); status: Mapped[str]=mapped_column(String(20),default='active'); provider: Mapped[str|None]=mapped_column(String(20)); external_id: Mapped[str|None]=mapped_column(String(128))
+class Payment(IdTime, Base):
+    __tablename__='payments'; workspace_id: Mapped[str]=mapped_column(ForeignKey('workspaces.id')); provider: Mapped[str]=mapped_column(String(20)); provider_payment_id: Mapped[str|None]=mapped_column(String(128),unique=True); amount: Mapped[int]=mapped_column(Integer); currency: Mapped[str]=mapped_column(String(8),default='UZS'); status: Mapped[str]=mapped_column(String(20),default='pending'); raw_event: Mapped[dict|None]=mapped_column(JSON)
 class InstagramAccount(IdTime, Base):
     __tablename__='instagram_accounts'; workspace_id: Mapped[str]=mapped_column(ForeignKey('workspaces.id')); username: Mapped[str]=mapped_column(String(100)); account_type: Mapped[str]=mapped_column(String(32)); offer: Mapped[str|None]=mapped_column(Text); encrypted_token: Mapped[str|None]=mapped_column(Text); token_key_version: Mapped[str|None]=mapped_column(String(20)); active: Mapped[bool]=mapped_column(Boolean,default=True); __table_args__=(UniqueConstraint('workspace_id','username'),)
 class Video(IdTime, Base):
