@@ -28,8 +28,11 @@ from .video import VideoValidationError, probe_video, validate_upload
 logger = logging.getLogger(__name__)
 router = Router(name="viral-video-ai")
 
+MENU_ACCOUNT = "📱 Akkaunt tahlili"
 MENU_ANALYZE = "🎬 Videoni tahlil qilish"
 MENU_IDEA = "💡 G‘oyani tekshirish"
+MENU_SCRIPT = "✍️ Ssenariy generator"
+MENU_VIRAL = "🔥 Viral g‘oyalar"
 MENU_PLAN = "🗓 Kontent-reja"
 MENU_COMPETITORS = "👥 Raqobatchilar"
 MENU_RESULTS = "📈 Natijalarim"
@@ -40,15 +43,28 @@ user_profiles: dict[int, dict[str, str]] = {}
 
 
 class Onboarding(StatesGroup):
+    phone = State()
     activity = State()
+    instagram_username = State()
+    account_type = State()
+    offer = State()
+    audience = State()
     objective = State()
+    language = State()
+    region = State()
+    monthly_video_count = State()
+    average_views = State()
+    max_views = State()
+    competitors = State()
 
 
 def main_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=MENU_ANALYZE), KeyboardButton(text=MENU_IDEA)],
+            [KeyboardButton(text=MENU_ACCOUNT), KeyboardButton(text=MENU_ANALYZE)],
+            [KeyboardButton(text=MENU_IDEA), KeyboardButton(text=MENU_SCRIPT)],
             [KeyboardButton(text=MENU_PLAN), KeyboardButton(text=MENU_COMPETITORS)],
+            [KeyboardButton(text=MENU_VIRAL), KeyboardButton(text=MENU_RESULTS)],
             [KeyboardButton(text=MENU_RESULTS), KeyboardButton(text=MENU_INSIGHTS)],
             [KeyboardButton(text=MENU_PROFILE)],
         ],
@@ -88,11 +104,21 @@ async def start(message: Message, state: FSMContext) -> None:
         f"Salom, {name}! ✦\n\n"
         "Men Viral Video AI — Reels’ingizni joylashdan oldin hook, retention, ssenariy va montaj signalini tekshiraman. "
         "Million ko‘rishni va’da qilmayman, ammo zaif joylarni vaqt kodi bilan ko‘rsataman.\n\n"
-        "Boshlash uchun faoliyat yo‘nalishingizni tanlang.",
-        reply_markup=activity_menu(),
+        "Boshlash uchun telefon raqamingizni yuboring (kontakt tugmasi yoki +998...).",
+        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="📱 Kontaktni yuborish", request_contact=True)]], resize_keyboard=True, one_time_keyboard=True),
     )
-    await state.set_state(Onboarding.activity)
+    await state.set_state(Onboarding.phone)
 
+
+@router.message(Onboarding.phone)
+async def collect_phone(message: Message, state: FSMContext) -> None:
+    phone = message.contact.phone_number if message.contact else (message.text or "")
+    if len(phone) < 7:
+        await message.answer("Telefon raqamini kontakt yoki matn ko‘rinishida yuboring.")
+        return
+    await state.update_data(phone=phone)
+    await message.answer("Faoliyat sohangizni tanlang.", reply_markup=activity_menu())
+    await state.set_state(Onboarding.activity)
 
 @router.message(Onboarding.activity)
 async def collect_activity(message: Message, state: FSMContext) -> None:
@@ -100,24 +126,48 @@ async def collect_activity(message: Message, state: FSMContext) -> None:
         await message.answer("Iltimos, tugmalardan birini tanlang.")
         return
     await state.update_data(activity=message.text)
-    await message.answer("Asosiy maqsadingiz nima?", reply_markup=objective_menu())
-    await state.set_state(Onboarding.objective)
+    await message.answer("Instagram username’ingizni @ belgisiz yuboring.", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(Onboarding.instagram_username)
 
 
-@router.message(Onboarding.objective)
-async def collect_objective(message: Message, state: FSMContext) -> None:
+ONBOARDING_FLOW = {
+    Onboarding.instagram_username: ("instagram_username", "Account type (expert, business, creator) ni yuboring:", Onboarding.account_type),
+    Onboarding.account_type: ("account_type", "Offer / asosiy taklifingizni yozing:", Onboarding.offer),
+    Onboarding.offer: ("offer", "Maqsadli auditoriyangizni yozing:", Onboarding.audience),
+    Onboarding.audience: ("audience", "Asosiy maqsadni tanlang:", Onboarding.objective),
+    Onboarding.objective: ("objective", "Kontent tili (masalan, uz, ru) ni yuboring:", Onboarding.language),
+    Onboarding.language: ("language", "Hudud / regionni yuboring:", Onboarding.region),
+    Onboarding.region: ("region", "Oyiga nechta video chiqasiz?", Onboarding.monthly_video_count),
+    Onboarding.monthly_video_count: ("monthly_video_count", "O‘rtacha ko‘rishlaringiz qancha?", Onboarding.average_views),
+    Onboarding.average_views: ("average_views", "Maksimal ko‘rishlaringiz qancha?", Onboarding.max_views),
+    Onboarding.max_views: ("max_views", "Raqobatchilarni vergul bilan yozing (yoki ‘yo‘q’):", Onboarding.competitors),
+}
+
+@router.message(*tuple(ONBOARDING_FLOW.keys()))
+async def collect_onboarding_value(message: Message, state: FSMContext) -> None:
     if not message.text:
-        await message.answer("Iltimos, tugmalardan birini tanlang.")
+        await message.answer("Iltimos, qiymatni matn ko‘rinishida yuboring.")
         return
+    current = await state.get_state()
+    state_map = {str(key): key for key in ONBOARDING_FLOW}
+    key = state_map[current]
+    field, prompt, next_state = ONBOARDING_FLOW[key]
+    await state.update_data(**{field: message.text.strip()})
+    markup = objective_menu() if next_state == Onboarding.objective else ReplyKeyboardRemove()
+    await message.answer(prompt, reply_markup=markup)
+    await state.set_state(next_state)
+
+@router.message(Onboarding.competitors)
+async def finish_onboarding(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer("Raqobatchilarni matn ko‘rinishida yuboring.")
+        return
+    await state.update_data(competitors=message.text.strip())
     data = await state.get_data()
     telegram_id = message.from_user.id if message.from_user else 0
-    user_profiles[telegram_id] = {"activity": data.get("activity", "Boshqa"), "objective": message.text}
+    user_profiles[telegram_id] = {k: str(v) for k, v in data.items()}
     await state.clear()
-    await message.answer(
-        "Tayyor! Siz uchun tavsiyalar faoliyat sohasi va maqsadingizga moslashtiriladi.\n\n"
-        "🎬 Video yuboring yoki quyidagi bo‘limlardan birini tanlang.",
-        reply_markup=main_menu(),
-    )
+    await message.answer("Tayyor! Profil, auditoriya va raqobatchi konteksti saqlandi.\n\n🎬 Video yuboring yoki menyudan bo‘limni tanlang.", reply_markup=main_menu())
 
 
 @router.message(F.text == MENU_ANALYZE)
@@ -139,9 +189,12 @@ async def request_idea(message: Message) -> None:
     )
 
 
-@router.message(F.text.in_({MENU_PLAN, MENU_COMPETITORS, MENU_RESULTS, MENU_INSIGHTS, MENU_PROFILE}))
+@router.message(F.text.in_({MENU_ACCOUNT, MENU_SCRIPT, MENU_VIRAL, MENU_PLAN, MENU_COMPETITORS, MENU_RESULTS, MENU_INSIGHTS, MENU_PROFILE}))
 async def coming_soon_menu(message: Message) -> None:
     answers = {
+        MENU_ACCOUNT: "📱 Akkaunt tahlili: profilingiz, o‘rtacha/max views va maqsad bo‘yicha benchmarklar tayyorlanadi.",
+        MENU_SCRIPT: "✍️ Ssenariy generator: mavzu yuboring — hook, value, proof va CTA strukturasini yarataman.",
+        MENU_VIRAL: "🔥 Viral g‘oyalar: sohangiz, auditoriya va raqobatchilar asosidagi g‘oyalarni tayyorlayman.",
         MENU_PLAN: "🗓 Oylik kontent-reja akkaunt tarixi va maqsadingiz asosida yaratiladi. Bu modul MVP’dan keyingi integratsiya bilan ochiladi.",
         MENU_COMPETITORS: "👥 Raqobatchi username’larini yuborishingiz mumkin. Ochiq kontent signallari asosida formatlar va kontent bo‘shliqlari ajratiladi.",
         MENU_RESULTS: "📈 Joylangan videolar uchun Insights’ni ulang yoki CSV yuklang. Shunda prognoz va real natija solishtiriladi.",

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight,
   ArrowUpRight,
@@ -54,6 +54,7 @@ const navItems = [
   { id: 'competitors', label: 'Raqobatchilar', icon: UsersRound },
   { id: 'results', label: 'Natijalarim', icon: BarChart3 },
   { id: 'insights', label: 'AI tavsiyalar', icon: Sparkles },
+  { id: 'admin', label: 'Admin', icon: ShieldCheck },
 ]
 
 const reportScores = [
@@ -873,6 +874,17 @@ function Toast({ data, onClose }) {
   return <div className={`toast toast-${data.type || 'info'}`}><span><Icon size={16} /></span><p>{data.message}</p><button onClick={onClose} aria-label="Yopish"><X size={15} /></button></div>
 }
 
+function AdminPage() {
+  const [summary, setSummary] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    fetch(`${import.meta.env.VITE_API_URL || '/api'}/v1/admin/summary`)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('Admin API unavailable')))
+      .then(setSummary).catch((cause) => setError(cause.message))
+  }, [])
+  return <section className="card report-summary"><div className="section-heading"><div><h3>Admin dashboard</h3><p>Persisted platform health summary from the API.</p></div></div>{error && <p>{error}</p>}{!summary && !error && <p>Yuklanmoqda…</p>}{summary && <div className="plan-kpis"><span><b>{summary.users}</b> users</span><i /><span><b>{summary.workspaces}</b> workspaces</span><i /><span><b>{summary.videos}</b> videos</span><i /><span><b>{summary.analyses}</b> analyses</span><i /><span><b>{summary.failed_analyses}</b> failed</span></div>}</section>
+}
+
 function App() {
   const [page, setPage] = useState('overview')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -887,6 +899,7 @@ function App() {
     competitors: 'Raqobatchilar',
     results: 'Natijalarim',
     insights: 'AI tavsiyalar',
+    admin: 'Admin dashboard',
     settings: 'Sozlamalar',
   }), [])
 
@@ -920,6 +933,7 @@ function App() {
         {page === 'competitors' && <CompetitorsPage toast={toast} />}
         {page === 'results' && <ResultsPage toast={toast} />}
         {page === 'insights' && <InsightsPage toast={toast} />}
+        {page === 'admin' && <AdminPage />}
         {page === 'settings' && <SettingsPage toast={toast} />}
       </div>
     </main>

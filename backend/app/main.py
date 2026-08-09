@@ -7,9 +7,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status, Depends
+from .auth import identity
+from .legacy import development_legacy_only
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+from .database import Base, engine, get_db
+from .models import ContentPlan, ContentItem, Competitor, InstagramMetric, Prediction, Video, AuditLog, User, Workspace
+from .security import rate_limit, hash_ip
 
 from .analyzer import check_idea
 from .config import settings
@@ -23,13 +30,20 @@ from .schemas import (
 )
 from .store import analysis_store
 from .video import VideoValidationError, probe_video, validate_upload
+from .production_routes import router as production_router
+from .payment_routes import router as payment_router
+from .secure_routes import router as secure_router
 
 SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    settings.validate_production()
     settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+    # Schema auto-create is deliberately development/test only; production runs Alembic.
+    if not settings.is_production:
+        Base.metadata.create_all(bind=engine)
     yield
 
 
@@ -46,9 +60,12 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.allowed_origins),
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
+app.include_router(production_router)
+app.include_router(payment_router)
+app.include_router(secure_router)
 
 
 def schedule(job_id: str) -> None:
@@ -63,6 +80,10 @@ def parse_context(raw_context: str) -> VideoContext:
         raise HTTPException(status_code=422, detail="context JSON noto‘g‘ri formatda.") from error
 
 
+@app.get('/v1/auth/session', tags=['auth'])
+async def session_check(user_id: str = Depends(identity)) -> dict[str, str]:
+    return {'user_id': user_id}
+
 @app.get("/health", tags=["system"])
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": settings.app_name, "environment": settings.environment}
@@ -75,8 +96,8 @@ async def health() -> dict[str, str]:
     tags=["analysis"],
     summary="Start a context-based analysis",
 )
-async def create_analysis(payload: CreateAnalysisRequest) -> AnalysisJob:
-    """Create an async analysis from a Mini App or manual data entry."""
+async def create_analysis(payload: CreateAnalysisRequest, _: None = Depends(development_legacy_only)) -> AnalysisJob:
+    """Development-only compatibility endpoint; production uses persisted workspace upload."""
     job = analysis_store.create(payload.context, payload.source_filename)
     schedule(job.id)
     return job
@@ -92,6 +113,7 @@ async def create_analysis(payload: CreateAnalysisRequest) -> AnalysisJob:
 async def upload_analysis(
     file: Annotated[UploadFile, File(description="MP4, MOV or AVI, 500 MB maximum")],
     context: Annotated[str, Form(description="Serialized VideoContext JSON")],
+    _: None = Depends(development_legacy_only),
 ) -> AnalysisJob:
     parsed_context = parse_context(context)
     original_name = file.filename or "video.mp4"
@@ -139,7 +161,7 @@ async def upload_analysis(
 
 
 @app.get("/v1/analyses/{job_id}", response_model=AnalysisJob, tags=["analysis"])
-async def get_analysis(job_id: str) -> AnalysisJob:
+async def get_analysis(job_id: str, _: None = Depends(development_legacy_only)) -> AnalysisJob:
     job = analysis_store.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Tahlil topilmadi.")
