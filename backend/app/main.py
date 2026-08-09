@@ -35,9 +35,11 @@ SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    settings.validate_production()
     settings.uploads_dir.mkdir(parents=True, exist_ok=True)
-    # Useful for local/dev. Deployments run Alembic before serving traffic.
-    Base.metadata.create_all(bind=engine)
+    # Schema auto-create is deliberately development/test only; production runs Alembic.
+    if not settings.is_production:
+        Base.metadata.create_all(bind=engine)
     yield
 
 
