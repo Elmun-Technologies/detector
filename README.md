@@ -67,6 +67,14 @@ npm run build
 PYTHONPATH=backend .venv/bin/pytest backend/tests -q
 ```
 
+## Tested vs. scaffold status
+
+**Tested locally:** SQLAlchemy persistence (SQLite), persisted upload → eager Celery pipeline → report, local private storage download, content plans/items, metrics, JSON/PDF exports, admin summary, rate-limited API boundary, deletion/anonymization, lint/build and integration tests.
+
+**Implemented but not operated against a real external service in this repository:** PostgreSQL migration, Redis non-eager worker, S3/MinIO adapter, FFmpeg analysis on a real media fixture, token encryption with a deployed key, Telegram WebApp validation and Telegram webhook/polling.
+
+**Still scaffold/partial:** bot menus beyond video/idea flow do not all invoke persisted APIs; the dashboard retains demo plan/report/competitor views except its upload, idea and admin-summary requests; no billing provider, Meta OAuth ingestion, RBAC or authenticated admin interface is included. See `TECHNICAL_GAP_AUDIT.md` for the authoritative per-module audit.
+
 ## Production operations
 
 Use managed PostgreSQL/Redis, a KMS-backed encryption key, real authentication/RBAC, Redis-backed distributed rate limits, malware scanning, S3 lifecycle deletion, Celery monitoring/DLQ, backups, observability and a data-processing/privacy policy before accepting user media.
