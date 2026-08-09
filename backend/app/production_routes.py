@@ -8,7 +8,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from .database import get_db
-from .models import AuditLog, Competitor, ContentItem, ContentPlan, InstagramMetric, Prediction, Video, User, Workspace, InstagramAccount, VideoAnalysis, AnalysisJob
+from .models import AuditLog, Competitor, ContentItem, ContentPlan, InstagramMetric, Prediction, Video, User, Workspace, WorkspaceMember, InstagramAccount, VideoAnalysis, AnalysisJob
 from .security import hash_ip, rate_limit
 from .auth import identity, require_workspace
 from .rbac import authorize_resource, authorize_content_item
@@ -30,6 +30,7 @@ def onboarding(p:OnboardingIn,request:Request,db:Session=Depends(get_db)):
  user=db.query(User).filter_by(telegram_id=p.telegram_id).first() if p.telegram_id else None
  if not user: user=User(telegram_id=p.telegram_id,phone=p.phone,locale=p.language);db.add(user);db.flush()
  workspace=Workspace(owner_id=user.id,name=p.name,industry=p.industry,audience=p.audience,objective=p.objective,region=p.region);db.add(workspace);db.flush()
+ db.add(WorkspaceMember(workspace_id=workspace.id,user_id=user.id,role='owner'))
  db.add(InstagramAccount(workspace_id=workspace.id,username=p.instagram_username.lstrip('@').lower(),account_type=p.account_type,offer=p.offer))
  for name in p.competitors: db.add(Competitor(workspace_id=workspace.id,username=name.lstrip('@').lower()))
  audit(db,request,workspace.id,'onboarding.completed','workspace');db.commit();return {'user_id':user.id,'workspace_id':workspace.id,'plan':workspace.plan}
@@ -44,7 +45,8 @@ def update_plan(workspace_id:str,p:PlanUpdate,request:Request,db:Session=Depends
  if not x or p.plan.lower() not in ('free','creator','pro','agency'):raise HTTPException(422,'Invalid workspace or plan')
  x.plan=p.plan.lower();audit(db,request,x.id,'plan.updated','workspace');db.commit();return {'plan':x.plan,'limits':entitlement(x.plan).__dict__}
 @router.post('/workspaces/{workspace_id}/videos/upload',status_code=202)
-async def persisted_upload(workspace_id:str,request:Request,file:UploadFile=File(...),context:str=Form('{}'),db:Session=Depends(get_db)):
+async def persisted_upload(workspace_id:str,request:Request,file:UploadFile=File(...),context:str=Form('{}'),db:Session=Depends(get_db),user:str=Depends(identity)):
+ require_workspace(db,workspace_id,user,'editor')
  w=db.get(Workspace,workspace_id)
  if not w:raise HTTPException(404,'Workspace not found')
  try: assert_video_limit(db,workspace_id,w.plan)
@@ -67,32 +69,42 @@ async def persisted_upload(workspace_id:str,request:Request,file:UploadFile=File
  analysis=VideoAnalysis(video_id=v.id,status='queued',media_metadata={'context':parsed.model_dump(mode='json')});db.add(analysis);db.flush();job=AnalysisJob(analysis_id=analysis.id,status='queued');db.add(job);audit(db,request,workspace_id,'video.uploaded','video');db.commit()
  result=analyze_video.delay(analysis.id);job.task_id=result.id;db.commit();return {'video_id':v.id,'analysis_id':analysis.id,'status':'queued'}
 @router.get('/analyses/persisted/{analysis_id}')
-def persisted_analysis(analysis_id:str,db:Session=Depends(get_db)):
+def persisted_analysis(analysis_id:str,db:Session=Depends(get_db),user:str=Depends(identity)):
+ authorize_resource(db,'analysis',analysis_id,user,'viewer')
  x=db.get(VideoAnalysis,analysis_id)
  if not x:raise HTTPException(404,'Analysis not found')
  return {'id':x.id,'status':x.status,'report':x.report,'metadata':x.media_metadata}
 @router.post('/workspaces/{workspace_id}/content-plans')
-def create_plan(workspace_id:str,p:PlanIn,request:Request,db:Session=Depends(get_db)):
+def create_plan(workspace_id:str,p:PlanIn,request:Request,db:Session=Depends(get_db),user:str=Depends(identity)):
+ require_workspace(db,workspace_id,user,'editor')
  plan=ContentPlan(workspace_id=workspace_id,month=p.month,title=p.title);db.add(plan);audit(db,request,workspace_id,'content_plan.created','content_plan');db.commit();db.refresh(plan);return {'id':plan.id,'month':plan.month,'title':plan.title,'status':plan.status}
 @router.get('/workspaces/{workspace_id}/content-plans')
-def plans(workspace_id:str,db:Session=Depends(get_db)):return [{'id':x.id,'month':x.month,'title':x.title,'status':x.status} for x in db.query(ContentPlan).filter_by(workspace_id=workspace_id).all()]
+def plans(workspace_id:str,db:Session=Depends(get_db),user:str=Depends(identity)):
+ require_workspace(db,workspace_id,user,'viewer')
+ return [{'id':x.id,'month':x.month,'title':x.title,'status':x.status} for x in db.query(ContentPlan).filter_by(workspace_id=workspace_id).all()]
 @router.post('/content-plans/{plan_id}/items')
-def add_item(plan_id:str,p:ItemIn,request:Request,db:Session=Depends(get_db)):
+def add_item(plan_id:str,p:ItemIn,request:Request,db:Session=Depends(get_db),user:str=Depends(identity)):
+ authorize_resource(db,'plan',plan_id,user,'editor')
  if not db.get(ContentPlan,plan_id):raise HTTPException(404,'Content plan not found')
  x=ContentItem(plan_id=plan_id,**p.model_dump());db.add(x);db.commit();db.refresh(x);return {'id':x.id,'topic':x.topic,'status':x.status}
 @router.post('/workspaces/{workspace_id}/competitors')
-def competitor(workspace_id:str,p:CompetitorIn,request:Request,db:Session=Depends(get_db)):
+def competitor(workspace_id:str,p:CompetitorIn,request:Request,db:Session=Depends(get_db),user:str=Depends(identity)):
+ require_workspace(db,workspace_id,user,'editor')
  x=Competitor(workspace_id=workspace_id,username=p.username.lstrip('@').lower(),notes=p.notes);db.add(x);audit(db,request,workspace_id,'competitor.created','competitor');db.commit();db.refresh(x);return {'id':x.id,'username':x.username,'notes':x.notes}
 @router.get('/workspaces/{workspace_id}/competitors')
-def competitors(workspace_id:str,db:Session=Depends(get_db)):return [{'id':x.id,'username':x.username,'notes':x.notes,'analysis':x.last_analysis} for x in db.query(Competitor).filter_by(workspace_id=workspace_id).all()]
+def competitors(workspace_id:str,db:Session=Depends(get_db),user:str=Depends(identity)):
+ require_workspace(db,workspace_id,user,'viewer')
+ return [{'id':x.id,'username':x.username,'notes':x.notes,'analysis':x.last_analysis} for x in db.query(Competitor).filter_by(workspace_id=workspace_id).all()]
 @router.post('/videos/{video_id}/metrics')
-def metrics(video_id:str,p:MetricsIn,request:Request,db:Session=Depends(get_db)):
+def metrics(video_id:str,p:MetricsIn,request:Request,db:Session=Depends(get_db),user:str=Depends(identity)):
+ authorize_resource(db,'video',video_id,user,'editor')
  if not db.get(Video,video_id):raise HTTPException(404,'Video not found')
  x=InstagramMetric(video_id=video_id,**p.model_dump());pred=db.query(Prediction).filter_by(video_id=video_id).first()
  if pred and pred.predicted_views:pred.actual_views=p.views;pred.accuracy=round(max(0,1-abs(p.views-pred.predicted_views)/max(pred.predicted_views,1))*100,2)
  db.add(x);db.commit();return {'id':x.id,'views':x.views,'prediction_accuracy':pred.accuracy if pred else None}
 @router.get('/videos/{video_id}/reports/{format}')
-def export_report(video_id:str,format:str,db:Session=Depends(get_db)):
+def export_report(video_id:str,format:str,db:Session=Depends(get_db),user:str=Depends(identity)):
+ authorize_resource(db,'video',video_id,user,'viewer')
  v=db.get(Video,video_id); analysis=db.query(VideoAnalysis).filter_by(video_id=video_id).first()
  if not v or not analysis:raise HTTPException(404,'Video not found')
  payload={'video_id':v.id,'filename':v.original_name,'status':analysis.status,'report':analysis.report,'generated_at':datetime.now(timezone.utc).isoformat()}
@@ -104,7 +116,8 @@ def export_report(video_id:str,format:str,db:Session=Depends(get_db)):
 def admin_summary(db:Session=Depends(get_db)):
  return {'users':db.query(User).count(),'workspaces':db.query(Workspace).count(),'videos':db.query(Video).count(),'analyses':db.query(VideoAnalysis).count(),'failed_analyses':db.query(VideoAnalysis).filter_by(status='failed').count()}
 @router.delete('/users/{user_id}')
-def delete_user_data(user_id:str,request:Request,db:Session=Depends(get_db)):
+def delete_user_data(user_id:str,request:Request,db:Session=Depends(get_db),user:str=Depends(identity)):
+ if user_id != user: raise HTTPException(403,'User ownership required')
  u=db.get(User,user_id)
  if not u:raise HTTPException(404,'User not found')
  u.phone=None;u.telegram_id=None;u.deleted_at=datetime.now(timezone.utc);audit(db,request,None,'user.data_deleted','user');db.commit();return {'status':'deleted'}
