@@ -1,0 +1,28 @@
+services:
+  api:
+    build:
+      context: ./backend
+    environment:
+      ENVIRONMENT: development
+      UPLOADS_DIR: /data/uploads
+      CORS_ORIGINS: http://localhost:5173
+    ports:
+      - "8000:8000"
+    volumes:
+      - viral_uploads:/data/uploads
+
+  bot:
+    build:
+      context: ./backend
+    command: python -m app.bot
+    environment:
+      ENVIRONMENT: development
+      UPLOADS_DIR: /data/uploads
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in your environment or .env file}
+    volumes:
+      - viral_uploads:/data/uploads
+    depends_on:
+      - api
+
+volumes:
+  viral_uploads:
