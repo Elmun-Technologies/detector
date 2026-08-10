@@ -112,6 +112,44 @@ def sample_mp4() -> Path:
     return SAMPLE_MP4
 
 
+class WorkdirTracker:
+    """Records the temporary working directories a task actually created."""
+
+    def __init__(self, created: list[Path]) -> None:
+        self.created = created
+
+    def assert_all_removed(self) -> None:
+        assert self.created, 'the pipeline never created a temporary working directory'
+        leaked = sorted(str(path) for path in self.created if path.exists())
+        assert leaked == [], f'temporary working directories survived the task: {leaked}'
+
+
+@pytest.fixture
+def workdir_tracker(monkeypatch) -> WorkdirTracker:
+    """Track pipeline working directories without globbing the shared temp dir.
+
+    Asserting on ``glob('viral-*')`` over ``tempfile.gettempdir()`` is not
+    hermetic: any other process that happens to create a ``viral-*`` entry
+    there - a parallel pytest session (whose conftest creates
+    ``viral-tests-*``), or a concurrent CI job - changes the snapshot and fails
+    the assertion for reasons unrelated to the code under test. Recording the
+    exact directories this task caused to be created is both stronger (it also
+    proves one was created, so the check cannot pass vacuously) and immune to
+    that interference.
+    """
+    real_mkdtemp = tempfile.mkdtemp
+    created: list[Path] = []
+
+    def spy(*args, **kwargs):
+        path = real_mkdtemp(*args, **kwargs)
+        if Path(path).name.startswith('viral-'):
+            created.append(Path(path))
+        return path
+
+    monkeypatch.setattr(tempfile, 'mkdtemp', spy)
+    return WorkdirTracker(created)
+
+
 @pytest.fixture
 def media_tools() -> bool:
     """Skip media-dependent assertions when FFmpeg is not installed."""

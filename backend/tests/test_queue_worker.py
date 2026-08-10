@@ -1,7 +1,6 @@
 """Queue and worker semantics: idempotency, retries, failure states, recovery."""
 from __future__ import annotations
 
-import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -57,9 +56,10 @@ def test_backoff_helpers_are_exponential_and_capped():
     assert should_retry(False, 1, 3) is False
 
 
-def test_pipeline_completes_and_persists_artifacts(session, tmp_path, sample_mp4, media_tools):
+def test_pipeline_completes_and_persists_artifacts(
+    session, tmp_path, sample_mp4, media_tools, workdir_tracker
+):
     _user, _workspace, video_id, analysis_id, job_id = stage_video(session, tmp_path, sample_mp4)
-    before = set(Path(tempfile.gettempdir()).glob('viral-*'))
 
     result = analyze_video.delay(analysis_id).get()
 
@@ -82,7 +82,7 @@ def test_pipeline_completes_and_persists_artifacts(session, tmp_path, sample_mp4
     assert all(storage.exists(artifact.storage_key) for artifact in artifacts)
 
     # Temporary working directories must not survive the task.
-    assert set(Path(tempfile.gettempdir()).glob('viral-*')) == before
+    workdir_tracker.assert_all_removed()
 
 
 def test_completed_job_is_not_recomputed_on_redelivery(session, tmp_path, sample_mp4):

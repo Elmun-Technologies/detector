@@ -122,11 +122,14 @@ def test_cleanup_survives_an_object_that_is_already_gone(session, tmp_path, samp
     assert session.get(MediaArtifact, artifact.id).deleted_at is not None
 
 
-def test_working_directories_do_not_survive_the_worker(session, tmp_path, sample_mp4, media_tools):
+def test_working_directories_do_not_survive_the_worker(
+    session, tmp_path, sample_mp4, media_tools, workdir_tracker
+):
     _workspace, _video, analysis_id, _job = stage(session, tmp_path, sample_mp4, suffix='workdir')
-    before = set(Path(tempfile.gettempdir()).glob('viral-*'))
+
     analyze_video.delay(analysis_id).get()
-    assert set(Path(tempfile.gettempdir()).glob('viral-*')) == before
+
+    workdir_tracker.assert_all_removed()
 
 
 def test_purge_removes_source_and_artifacts_for_erasure(session, tmp_path, sample_mp4):
