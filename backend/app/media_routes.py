@@ -265,17 +265,11 @@ def source_download_url(video_id: str, db: Session = Depends(get_db), user: str 
 
 
 # --------------------------------------------------------------------------- local signed object endpoint
-@router.api_route('/storage/objects/{key:path}', methods=['GET', 'PUT'])
-async def local_signed_object(
-    key: str,
-    request: Request,
-    expires: int = 0,
-    signature: str = '',
-):
-    """Serve/accept objects for the local development storage backend only.
+def _local_backend(key: str, method: str, expires: int, signature: str) -> LocalStorage:
+    """Resolve + authorise the local storage backend for a signed object URL.
 
-    In production the presigned URL points at S3/MinIO and this route is
-    disabled, so no application process streams private media.
+    In production the presigned URL points straight at S3/MinIO, so these two
+    routes are disabled and no application process ever streams private media.
     """
     if settings.storage_backend != 'local':
         raise HTTPException(404, 'Signed object endpoint is only used by the local storage backend')
@@ -283,23 +277,33 @@ async def local_signed_object(
     if not isinstance(storage, LocalStorage):  # pragma: no cover - defensive
         raise HTTPException(404, 'Local storage backend is not active')
     try:
-        LocalStorage.verify(key, request.method, expires, signature)
+        LocalStorage.verify(key, method, expires, signature)
     except StorageError as error:
         raise HTTPException(403, error.code) from error
+    return storage
 
-    if request.method == 'PUT':
-        body = await request.body()
-        if len(body) > settings.max_upload_bytes:
-            raise HTTPException(413, 'File too large')
-        with tempfile.NamedTemporaryFile(delete=False) as handle:
-            handle.write(body)
-            temporary = Path(handle.name)
-        try:
-            stored = storage.put_file(temporary, key, request.headers.get('content-type'))
-        finally:
-            temporary.unlink(missing_ok=True)
-        return {'key': stored.key, 'size_bytes': stored.size_bytes}
 
+@router.put('/storage/objects/{key:path}', include_in_schema=False)
+async def local_signed_object_put(key: str, request: Request, expires: int = 0, signature: str = ''):
+    """Accept a presigned upload for the local development storage backend."""
+    storage = _local_backend(key, 'PUT', expires, signature)
+    body = await request.body()
+    if len(body) > settings.max_upload_bytes:
+        raise HTTPException(413, 'File too large')
+    with tempfile.NamedTemporaryFile(delete=False) as handle:
+        handle.write(body)
+        temporary = Path(handle.name)
+    try:
+        stored = storage.put_file(temporary, key, request.headers.get('content-type'))
+    finally:
+        temporary.unlink(missing_ok=True)
+    return {'key': stored.key, 'size_bytes': stored.size_bytes}
+
+
+@router.get('/storage/objects/{key:path}', include_in_schema=False)
+async def local_signed_object_get(key: str, expires: int = 0, signature: str = ''):
+    """Serve a private object for the local development storage backend."""
+    storage = _local_backend(key, 'GET', expires, signature)
     try:
         stat = storage.stat(key)
     except StorageNotFoundError as error:
