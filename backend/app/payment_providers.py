@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 from .config import settings
-from .external_integrations import verify_payment_signature, payment_provider_ready
+from .external_integrations import verify_payment_signature
 from .providers import ProviderConfigurationError
 @dataclass(frozen=True)
 class Checkout: provider:str; checkout_url:str; provider_payment_id:str

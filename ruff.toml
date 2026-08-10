@@ -1,0 +1,24 @@
+# Backend lint configuration.
+#
+# The rule set is deliberately behavioural (pyflakes/bugbear/pyupgrade) rather
+# than cosmetic: parts of this repository are written in a very dense style and
+# reformatting them would obscure the production changes in review.
+line-length = 200
+target-version = "py311"
+extend-exclude = [".venv", "node_modules", "dist", "data", "backend/alembic/versions/__pycache__"]
+
+[lint]
+select = ["E4", "E7", "E9", "F", "B", "UP"]
+ignore = [
+    "E701",   # dense one-statement-per-colon style used by the existing modules
+    "E702",   # same, with semicolons
+    "E741",   # short loop variables in the compact modules
+    "B008",   # FastAPI dependency injection idiom: Depends()/File() in defaults
+    "UP031",  # legacy %-format strings in the compact modules
+    "UP038",  # isinstance tuples are cheaper than PEP 604 unions at runtime
+    "UP017",  # timezone.utc is explicit and works on every supported runtime
+]
+
+[lint.per-file-ignores]
+"backend/tests/*" = ["B017", "E402", "F401"]
+"backend/alembic/*" = ["E402", "F401"]

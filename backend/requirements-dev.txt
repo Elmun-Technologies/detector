@@ -1,3 +1,7 @@
 -r requirements.txt
 httpx==0.28.1
 pytest==8.3.4
+# S3 adapter contract tests run against a mocked AWS endpoint (no credentials).
+moto[s3]==5.0.28
+# Linting for the backend package.
+ruff==0.8.6

@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from .database import get_db
 from .auth import identity,require_workspace
-from .models import Workspace,WorkspaceMember,Subscription,Payment,AuditLog,VideoAnalysis,AnalysisJob,User
+from .models import Workspace,WorkspaceMember,Subscription,Payment,AuditLog,VideoAnalysis,User
 from .billing import change_member_role,remove_member
 from .rbac import authorize_resource
 router=APIRouter(prefix='/v1')

@@ -1,4 +1,5 @@
-import hashlib, hmac
+import hashlib
+import hmac
 import pytest
 from app import external_integrations as ext
 from app.providers import ProviderConfigurationError, UnconfiguredProvider
