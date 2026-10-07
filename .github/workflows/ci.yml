@@ -131,51 +131,43 @@ jobs:
         run: pip install -r backend/requirements-dev.txt
 
       # MinIO needs a custom command, which GitHub service containers cannot express.
+      # MinIO removed minio/minio and minio/mc from Docker Hub in September 2026,
+      # so pull its quay.io registry first and fall back to a frozen community mirror.
       - name: Start MinIO
         run: |
           set -uo pipefail
-          report_failure() {
-            echo "=== MinIO startup failed; collecting diagnostics ==="
-            {
-              echo '--- command -v docker'; command -v docker || echo 'docker CLI not found'
-              echo '--- docker version'; docker version 2>&1 | head -20
-              echo '--- docker info'; docker info 2>&1 | head -25
-              echo '--- ports 9000/9001'; (ss -tln 2>/dev/null || netstat -tln 2>/dev/null) | grep -E ':9000|:9001' || echo 'ports free'
-              echo '--- docker ps -a'; docker ps -a 2>&1
-              echo '--- docker images'; docker images 2>&1 | head -10
-              echo '--- minio logs'; docker logs --tail 60 minio 2>&1 || true
-              echo '--- health probe'; curl -sv --max-time 5 http://localhost:9000/minio/health/live 2>&1 | tail -15
-            } > minio-diagnostics.txt
-            cat minio-diagnostics.txt
-            PAYLOAD=$(python3 -c 'import json; print(json.dumps({"body": "```\\n" + open("minio-diagnostics.txt").read() + "\\n```"}))')
-            ISSUE=$(gh pr list --state open --head "$GITHUB_HEAD_REF" --json number --jq '.[0].number' 2>/dev/null || true)
-            if [ -n "${ISSUE:-}" ]; then
-              curl -s -o /dev/null -w "posted diagnostics to PR #$ISSUE\n" \
-                -X POST -H "Authorization: token $GITHUB_TOKEN" -H 'Content-Type: application/json' \
-                -d "$PAYLOAD" "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/issues/$ISSUE/comments" || true
+          MINIO_IMAGE=""
+          for candidate in \
+            "quay.io/minio/minio:RELEASE.2025-10-15T17-29-55Z" \
+            "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z" \
+            "coollabsio/minio:RELEASE.2025-10-15T17-29-55Z"; do
+            if docker pull "$candidate"; then
+              MINIO_IMAGE="$candidate"
+              break
             fi
-            exit 1
-          }
-
-          # The docker daemon can take a moment after runner boot.
-          for i in $(seq 1 10); do docker info >/dev/null 2>&1 && break; sleep 3; done
-          # Pull with retries: Docker Hub can 429 anonymous pulls on shared runner IPs.
-          for i in 1 2 3; do
-            docker pull minio/minio:latest && break
-            echo "pull attempt $i failed, retrying in 20s"
-            sleep 20
+            echo "pull failed for $candidate, trying next candidate"
           done
+          if [ -z "$MINIO_IMAGE" ]; then
+            echo "no pullable MinIO image found in any registry"
+            docker version 2>&1 | head -20 || true
+            exit 1
+          fi
           docker rm -f minio >/dev/null 2>&1 || true
           docker run -d --name minio -p 9000:9000 -p 9001:9001 \
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:latest server /data --console-address ":9001" || report_failure
+            "$MINIO_IMAGE" server /data --console-address ":9001" \
+            || { echo "docker run failed for $MINIO_IMAGE"; docker ps -a; docker logs --tail 40 minio 2>/dev/null || true; exit 1; }
           for attempt in $(seq 1 40); do
             if curl -fsS http://localhost:9000/minio/health/live >/dev/null; then
-              echo "MinIO is ready"; exit 0
+              echo "MinIO is ready ($MINIO_IMAGE)"
+              exit 0
             fi
             sleep 2
           done
-          report_failure
+          echo "MinIO did not become ready ($MINIO_IMAGE)"
+          docker ps -a
+          docker logs --tail 80 minio || true
+          exit 1
 
       - name: Alembic upgrade head (PostgreSQL)
         run: PYTHONPATH=backend alembic upgrade head
