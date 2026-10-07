@@ -86,7 +86,7 @@ def test_alembic_upgrade_head_runs_against_postgresql():
 
     db_name = f'ci_{uuid.uuid4().hex[:10]}'
     base = urlsplit(DATABASE_URL)
-    url = urlunsplit((base.scheme, base.netloc, f'/{db_name}', base.query, base.fragment)).geturl()
+    url = urlunsplit((base.scheme, base.netloc, f'/{db_name}', base.query, base.fragment))
     admin = create_engine(DATABASE_URL, isolation_level='AUTOCOMMIT')
     with admin.connect() as connection:
         connection.execute(text(f'CREATE DATABASE "{db_name}"'))
