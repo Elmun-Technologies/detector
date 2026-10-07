@@ -71,28 +71,39 @@ minio = pytest.mark.skipif(
 # --------------------------------------------------------------------------- PostgreSQL
 @postgres
 def test_alembic_upgrade_head_runs_against_postgresql():
+    """Run the full migration chain against a throwaway database.
+
+    A fresh database (rather than a fresh schema) keeps the URL free of
+    connection options: alembic's Config stores it in a configparser section,
+    where a percent-encoded URL would crash on '%' interpolation, and raw
+    ``options=`` values are driver-specific. The CI postgres user is a
+    superuser (POSTGRES_USER), so it can create/drop databases.
+    """
     from alembic import command
     from alembic.config import Config
     from sqlalchemy import create_engine, inspect, text
+    from urllib.parse import urlsplit, urlunsplit
 
-    schema = f'ci_{uuid.uuid4().hex[:10]}'
-    engine = create_engine(DATABASE_URL)
-    with engine.begin() as connection:
-        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    db_name = f'ci_{uuid.uuid4().hex[:10]}'
+    base = urlsplit(DATABASE_URL)
+    url = urlunsplit((base.scheme, base.netloc, f'/{db_name}', base.query, base.fragment)).geturl()
+    admin = create_engine(DATABASE_URL, isolation_level='AUTOCOMMIT')
+    with admin.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{db_name}"'))
     try:
-        url = f'{DATABASE_URL}?options=-csearch_path%3D{schema}'
         config = Config(str(Path(__file__).parents[2] / 'alembic.ini'))
         config.set_main_option('script_location', str(Path(__file__).parents[1] / 'alembic'))
         config.set_main_option('sqlalchemy.url', url)
         command.upgrade(config, 'head')
 
         info = inspect(create_engine(url))
-        tables = set(info.get_table_names(schema=schema))
+        tables = set(info.get_table_names())
         assert {'users', 'workspaces', 'videos', 'video_analyses', 'analysis_jobs', 'media_artifacts', 'provider_calls'} <= tables
     finally:
-        with engine.begin() as connection:
-            connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
-        engine.dispose()
+        # WITH (FORCE): disconnect any pooled sessions before dropping.
+        with admin.connect() as connection:
+            connection.execute(text(f'DROP DATABASE "{db_name}" WITH (FORCE)'))
+        admin.dispose()
 
 
 @postgres
@@ -192,29 +203,43 @@ def minio_storage():
         restore(previous)
 
 
+def _upload_payload(tmp_path: Path, sample_mp4: Path, name: str) -> tuple[Path, bytes]:
+    """Copy the shared fixture to a private temp file.
+
+    ``put_file`` has move semantics (the source is consumed), so tests must
+    never hand it the tracked fixture itself.
+    """
+    payload: Path = tmp_path / name
+    payload.write_bytes(sample_mp4.read_bytes())
+    return payload, payload.read_bytes()
+
+
 @minio
 def test_minio_roundtrip_with_presigned_urls(minio_storage, tmp_path, sample_mp4):
     import httpx
 
     from app.storage import source_key
 
+    payload, original = _upload_payload(tmp_path, sample_mp4, 'clip.mp4')
+
     key = source_key('integration', uuid.uuid4().hex, 'clip.mp4')
-    stored = minio_storage.put_file(sample_mp4, key, 'video/mp4')
-    assert stored.size_bytes == sample_mp4.stat().st_size
+    stored = minio_storage.put_file(payload, key, 'video/mp4')
+    assert stored.size_bytes == len(original)
+    assert not payload.exists(), 'put_file moves the source into storage'
     assert minio_storage.exists(key)
 
     destination: Path = tmp_path / 'downloaded.mp4'
     minio_storage.download(key, destination)
-    assert destination.read_bytes() == sample_mp4.read_bytes()
+    assert destination.read_bytes() == original
 
     presigned = minio_storage.presigned_get_url(key)
     response = httpx.get(presigned.url, timeout=10)
     assert response.status_code == 200
-    assert len(response.content) == sample_mp4.stat().st_size
+    assert len(response.content) == len(original)
 
     upload_key = source_key('integration', uuid.uuid4().hex, 'upload.mp4')
     put_url = minio_storage.presigned_put_url(upload_key, content_type='video/mp4')
-    uploaded = httpx.put(put_url.url, content=sample_mp4.read_bytes(), headers=put_url.headers, timeout=30)
+    uploaded = httpx.put(put_url.url, content=original, headers=put_url.headers, timeout=30)
     assert uploaded.status_code in {200, 204}
     assert minio_storage.exists(upload_key)
 
@@ -224,13 +249,14 @@ def test_minio_roundtrip_with_presigned_urls(minio_storage, tmp_path, sample_mp4
 
 
 @minio
-def test_minio_objects_are_private_without_a_signature(minio_storage, sample_mp4):
+def test_minio_objects_are_private_without_a_signature(minio_storage, tmp_path, sample_mp4):
     import httpx
 
     from app.storage import source_key
 
+    payload, _ = _upload_payload(tmp_path, sample_mp4, 'private.mp4')
     key = source_key('integration', uuid.uuid4().hex, 'private.mp4')
-    minio_storage.put_file(sample_mp4, key, 'video/mp4')
+    minio_storage.put_file(payload, key, 'video/mp4')
     try:
         endpoint = S3_ENDPOINT.rstrip('/')
         response = httpx.get(f'{endpoint}/{S3_BUCKET}/{key}', timeout=10)
@@ -240,12 +266,13 @@ def test_minio_objects_are_private_without_a_signature(minio_storage, sample_mp4
 
 
 @minio
-def test_minio_lifecycle_and_prefix_cleanup(minio_storage, sample_mp4):
+def test_minio_lifecycle_and_prefix_cleanup(minio_storage, tmp_path, sample_mp4):
     from app.storage import artifact_key
 
     minio_storage.ensure_lifecycle()
+    payload, _ = _upload_payload(tmp_path, sample_mp4, 'frame.jpg')
     key = artifact_key('integration', uuid.uuid4().hex, 'frame', 'frame.jpg')
-    minio_storage.put_file(sample_mp4, key, 'image/jpeg')
+    minio_storage.put_file(payload, key, 'image/jpeg')
     removed = minio_storage.cleanup_expired('workspaces/integration', timedelta(seconds=-1))
     assert removed >= 1
     assert not minio_storage.exists(key)

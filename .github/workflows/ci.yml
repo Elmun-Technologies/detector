@@ -10,6 +10,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Needed for ci/post_failure.py to comment the log tail on the PR when a step
+# fails (the default token permissions are not guaranteed to include issues).
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 env:
   PYTHON_VERSION: '3.11'
   NODE_VERSION: '20'
