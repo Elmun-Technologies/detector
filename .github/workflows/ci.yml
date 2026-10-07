@@ -173,10 +173,28 @@ jobs:
         run: PYTHONPATH=backend alembic upgrade head
 
       - name: Integration profile tests
-        run: pytest backend/tests -m integration -q -rs
+        run: |
+          set -o pipefail
+          pytest backend/tests -m integration -q -rs 2>&1 | tee integration-tests.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" != "0" ]; then
+            PR="${{ github.event.pull_request.number }}"
+            [ -n "$PR" ] || PR=$(gh pr view --json number --jq '.number' 2>/dev/null || echo '')
+            python3 ci/post_failure.py "$PR" integration-tests.log
+            exit "$status"
+          fi
 
       - name: Full suite against PostgreSQL and Redis
-        run: pytest backend/tests -m "not integration" -q
+        run: |
+          set -o pipefail
+          pytest backend/tests -m "not integration" -q 2>&1 | tee full-suite.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" != "0" ]; then
+            PR="${{ github.event.pull_request.number }}"
+            [ -n "$PR" ] || PR=$(gh pr view --json number --jq '.number' 2>/dev/null || echo '')
+            python3 ci/post_failure.py "$PR" full-suite.log
+            exit "$status"
+          fi
 
       - name: Stop MinIO
         if: always()
