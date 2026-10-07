@@ -88,6 +88,10 @@ npm ci && npm run dev
 
 Defaults in development: SQLite, `QUEUE_MODE=inline` (the task runs in-process), local private storage under `./data/uploads`, demo narrative enabled. The dashboard talks to `/api` (Vite proxies it locally).
 
+### Dashboard session model
+
+The dashboard speaks only to the real, RBAC-protected API. On first load it calls `POST /v1/session/bootstrap` (development-only, `410` in production), which creates or reuses the demo user + owner workspace and returns a signed token; the token is stored in the browser and refreshed automatically on expiry. Every view — upload, report, plan, competitors, results, insights, settings — reads and writes through workspace-scoped endpoints. Without FFmpeg the media signals degrade to labelled `insufficient_data` (honest, per the evidence policy); with FFmpeg every measured fact is real. A 6-second demo clip is served at `/demo-clip.mp4` for one-click upload testing.
+
 ## Production
 
 | Concern | Development | Production (enforced by `Settings.validate_production`) |
@@ -104,6 +108,8 @@ docker compose up --build                 # postgres, redis, api, worker, beat, 
 docker compose --profile s3 up --build    # + MinIO and a private bucket bootstrap
 ```
 
+All compose credentials are environment-driven: `DATABASE_URL`, `REDIS_URL`, `POSTGRES_DB/USER/PASSWORD`, `MINIO_ROOT_USER/PASSWORD`, `S3_BUCKET` and `S3_ENDPOINT` are interpolated from `.env`/shell with development fallbacks, so a shared deployment sets real credentials in `.env` without editing the compose file.
+
 Probes: `GET /health` (liveness, no dependencies) and `GET /ready` (database, storage and broker; `503` when any is down, and it reports the provider mode).
 
 ## Validation
@@ -118,7 +124,7 @@ DATABASE_URL=sqlite:///$PWD/ci.db PYTHONPATH=backend alembic upgrade head   # mi
 
 GitHub Actions runs lint, frontend build, the test suite with FFmpeg, an Alembic smoke migration, and an integration job with PostgreSQL + Redis + MinIO service containers. The integration tests skip themselves (they do not fail) when a service is not configured, so the same commands work locally.
 
-The pipeline definition currently lives at `ci/github-actions/ci.yml`: the Arena GitHub App token that produced this branch is not allowed to write under `.github/workflows/`. Activating it is a single `git mv` — see [`ci/README.md`](ci/README.md).
+The pipeline is active at [`.github/workflows/ci.yml`](.github/workflows/ci.yml) and runs on every push and pull request — see [`ci/README.md`](ci/README.md).
 
 Test suites of note:
 

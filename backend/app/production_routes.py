@@ -139,6 +139,62 @@ def onboarding(payload: OnboardingIn, request: Request, db: Session = Depends(ge
     return {'user_id': user.id, 'workspace_id': workspace.id, 'plan': workspace.plan}
 
 
+@router.get('/workspaces/{workspace_id}/videos')
+def list_videos(workspace_id: str, db: Session = Depends(get_db), user: str = Depends(identity)):
+    """The workspace's videos with analysis status, prediction and latest metrics."""
+    require_workspace(db, workspace_id, user, 'viewer')
+    videos = db.query(Video).filter_by(workspace_id=workspace_id).order_by(Video.created_at.desc()).limit(50).all()
+    items = []
+    for video in videos:
+        analysis = db.query(VideoAnalysis).filter_by(video_id=video.id).first()
+        prediction = db.query(Prediction).filter_by(video_id=video.id).first()
+        metric = db.query(InstagramMetric).filter_by(video_id=video.id).order_by(InstagramMetric.captured_at.desc()).first()
+        score = None
+        if analysis is not None and isinstance(analysis.report, dict):
+            score = (analysis.report.get('scores') or {}).get('viral_score')
+        items.append(
+            {
+                'id': video.id,
+                'original_name': video.original_name,
+                'created_at': video.created_at,
+                'status': video.status,
+                'duration_seconds': video.duration_seconds,
+                'width': video.width,
+                'height': video.height,
+                'analysis': (
+                    {
+                        'id': analysis.id,
+                        'status': analysis.status,
+                        'viral_score': score,
+                        'provider_mode': analysis.provider_mode,
+                        'completed_at': analysis.completed_at,
+                    }
+                    if analysis is not None
+                    else None
+                ),
+                'prediction': (
+                    {'predicted_views': prediction.predicted_views, 'actual_views': prediction.actual_views, 'accuracy': prediction.accuracy}
+                    if prediction is not None
+                    else None
+                ),
+                'latest_metric': (
+                    {
+                        'views': metric.views,
+                        'reach': metric.reach,
+                        'likes': metric.likes,
+                        'comments': metric.comments,
+                        'shares': metric.shares,
+                        'saves': metric.saves,
+                        'captured_at': metric.captured_at,
+                    }
+                    if metric is not None
+                    else None
+                ),
+            }
+        )
+    return items
+
+
 @router.get('/workspaces/{workspace_id}')
 def workspace(workspace_id: str, db: Session = Depends(get_db)):
     row = db.get(Workspace, workspace_id)
@@ -295,6 +351,47 @@ def create_plan(workspace_id: str, payload: PlanIn, request: Request, db: Sessio
     db.commit()
     db.refresh(plan)
     return {'id': plan.id, 'month': plan.month, 'title': plan.title, 'status': plan.status}
+
+
+class ItemUpdate(BaseModel):
+    topic: str | None = None
+    hook: str | None = None
+    script: str | None = None
+    scheduled_for: datetime | None = None
+    status: str | None = None
+
+
+@router.patch('/content-plans/{plan_id}/items/{item_id}')
+def update_item(plan_id: str, item_id: str, payload: ItemUpdate, db: Session = Depends(get_db), user: str = Depends(identity)):
+    authorize_resource(db, 'plan', plan_id, user, 'editor')
+    item = db.get(ContentItem, item_id)
+    if not item or item.plan_id != plan_id:
+        raise HTTPException(404, 'Content item not found')
+    for key, value in payload.model_dump(exclude_none=True).items():
+        setattr(item, key, value)
+    db.commit()
+    db.refresh(item)
+    return {'id': item.id, 'topic': item.topic, 'hook': item.hook, 'script': item.script, 'scheduled_for': item.scheduled_for, 'status': item.status}
+
+
+@router.get('/content-plans/{plan_id}')
+def plan_detail(plan_id: str, db: Session = Depends(get_db), user: str = Depends(identity)):
+    """One content plan with all of its items."""
+    authorize_resource(db, 'plan', plan_id, user, 'viewer')
+    plan = db.get(ContentPlan, plan_id)
+    if not plan:
+        raise HTTPException(404, 'Content plan not found')
+    items = db.query(ContentItem).filter_by(plan_id=plan_id).order_by(ContentItem.created_at).all()
+    return {
+        'id': plan.id,
+        'month': plan.month,
+        'title': plan.title,
+        'status': plan.status,
+        'items': [
+            {'id': item.id, 'topic': item.topic, 'hook': item.hook, 'script': item.script, 'scheduled_for': item.scheduled_for, 'status': item.status}
+            for item in items
+        ],
+    }
 
 
 @router.get('/workspaces/{workspace_id}/content-plans')
