@@ -133,16 +133,30 @@ jobs:
       # MinIO needs a custom command, which GitHub service containers cannot express.
       - name: Start MinIO
         run: |
+          set -uo pipefail
+          # The docker daemon can take a moment after runner boot.
+          for i in $(seq 1 10); do docker info >/dev/null 2>&1 && break; sleep 3; done
+          # Pull with retries: Docker Hub can 429 anonymous pulls on shared runner IPs.
+          for i in 1 2 3; do
+            docker pull minio/minio:latest && break
+            echo "pull attempt $i failed, retrying in 20s"
+            sleep 20
+          done
+          docker rm -f minio >/dev/null 2>&1 || true
           docker run -d --name minio -p 9000:9000 -p 9001:9001 \
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:latest server /data --console-address ':9001'
+            minio/minio:latest server /data --console-address ":9001" \
+            || { echo 'docker run failed; diagnostics:'; docker ps -a; docker images; exit 1; }
           for attempt in $(seq 1 40); do
             if curl -fsS http://localhost:9000/minio/health/live >/dev/null; then
               echo "MinIO is ready"; exit 0
             fi
             sleep 2
           done
-          echo "MinIO did not become ready"; docker logs minio; exit 1
+          echo "MinIO did not become ready; diagnostics:"
+          docker ps -a
+          docker logs --tail 80 minio || true
+          exit 1
 
       - name: Alembic upgrade head (PostgreSQL)
         run: PYTHONPATH=backend alembic upgrade head
