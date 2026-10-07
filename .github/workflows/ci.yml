@@ -187,6 +187,9 @@ jobs:
           pytest backend/tests -m integration -q -rs 2>&1 | tee integration-tests.log
           status=${PIPESTATUS[0]}
           if [ "$status" != "0" ]; then
+            # Annotation with the log tail: readable via the jobs API even
+            # when PR comment posting is not possible.
+            echo "::error title=Integration profile tests failed::$(tail -c 8000 integration-tests.log | sed -e 's/$/\\n/' | tr -d '\n' | cut -c1-60000)"
             PR="${{ github.event.pull_request.number }}"
             [ -n "$PR" ] || PR=$(gh pr view --json number --jq '.number' 2>/dev/null || echo '')
             python3 ci/post_failure.py "$PR" integration-tests.log
@@ -199,6 +202,7 @@ jobs:
           pytest backend/tests -m "not integration" -q 2>&1 | tee full-suite.log
           status=${PIPESTATUS[0]}
           if [ "$status" != "0" ]; then
+            echo "::error title=Full suite failed::$(tail -c 8000 full-suite.log | sed -e 's/$/\\n/' | tr -d '\n' | cut -c1-60000)"
             PR="${{ github.event.pull_request.number }}"
             [ -n "$PR" ] || PR=$(gh pr view --json number --jq '.number' 2>/dev/null || echo '')
             python3 ci/post_failure.py "$PR" full-suite.log
