@@ -183,9 +183,11 @@ jobs:
         run: |
           # The default shell is 'bash -eo pipefail': without 'set +e' the
           # step dies on the pytest line before the diagnostics can run.
+          echo "::notice title=integration step probe::shell=$0 bash=${BASH_VERSION:-none} pwd=$(pwd)"
           set +e
           pytest backend/tests -m integration -q -rs 2>&1 | tee integration-tests.log
           status=${PIPESTATUS[0]}
+          echo "::notice title=integration after pytest::pytest-exit=$status"
           if [ "$status" != "0" ]; then
             # Annotation with the log tail: readable via the jobs API even
             # when PR comment posting is not possible.
