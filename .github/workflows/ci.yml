@@ -181,7 +181,9 @@ jobs:
 
       - name: Integration profile tests
         run: |
-          set -o pipefail
+          # The default shell is 'bash -eo pipefail': without 'set +e' the
+          # step dies on the pytest line before the diagnostics can run.
+          set +e
           pytest backend/tests -m integration -q -rs 2>&1 | tee integration-tests.log
           status=${PIPESTATUS[0]}
           if [ "$status" != "0" ]; then
@@ -193,7 +195,7 @@ jobs:
 
       - name: Full suite against PostgreSQL and Redis
         run: |
-          set -o pipefail
+          set +e
           pytest backend/tests -m "not integration" -q 2>&1 | tee full-suite.log
           status=${PIPESTATUS[0]}
           if [ "$status" != "0" ]; then
