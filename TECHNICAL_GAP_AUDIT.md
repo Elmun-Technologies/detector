@@ -25,7 +25,7 @@ No untested module is labelled DONE.
 | Structured JSON logging + request-id middleware | DONE | `test_observability.py` — correlation id generation/echo/sanitisation, log scrubbing of credentials, exception serialisation. |
 | `/health` and `/ready` probes | DONE | `test_observability.py` — ready reports database/storage/broker and returns `503` when a dependency is down. |
 | Alembic migration chain incl. media pipeline schema | DONE (SQLite) / EXTERNAL_CREDENTIAL_REQUIRED (PostgreSQL) | `test_migrations.py` runs `upgrade head`, checks indexes/uniqueness, reversibility and ORM parity on SQLite. PostgreSQL requires `DATABASE_URL=postgresql+psycopg://…`; the CI integration job runs the same migration there. |
-| GitHub Actions CI (lint, build, tests, migration smoke, integration profile) | PARTIAL — written, activation blocked | Pipeline at `ci/github-actions/ci.yml`. The Arena GitHub App token lacks the `workflows` permission, so the file cannot be pushed into `.github/workflows/`; a maintainer activates it with one `git mv` (see `ci/README.md`). Every job's commands were executed locally (lint, build, test, Alembic smoke); the integration job additionally needs PostgreSQL/Redis/MinIO service containers. |
+| GitHub Actions CI (lint, build, tests, migration smoke, integration profile) | DONE (enabled) | Pipeline active at `.github/workflows/ci.yml` on every push/PR. Every job's commands were executed locally (lint, build, test, Alembic smoke); the integration job additionally needs PostgreSQL/Redis/MinIO service containers. |
 
 ## Platform (Milestone 1 carry-over)
 
@@ -40,8 +40,8 @@ No untested module is labelled DONE.
 | Meta OAuth state / callback exchange | EXTERNAL_CREDENTIAL_REQUIRED | `META_APP_ID`, `META_APP_SECRET`, `META_REDIRECT_URI`; signed-state contract test prevents tampering. |
 | Payment state machine and idempotency | PARTIAL | Provider event idempotency and paid/failed/cancelled/refunded transitions are tested; provider checkout/webhook wiring stays credential-gated. |
 | Payment webhook signature contract | EXTERNAL_CREDENTIAL_REQUIRED | `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, `PAYME_KEY` or `CLICK_SECRET_KEY`. |
-| Dashboard | PARTIAL | Upload, idea check and admin summary call the API; the remaining strategy/result views still render presentation data. |
-| Docker Compose runtime (api, worker, beat, bot, MinIO profile) | EXTERNAL_CREDENTIAL_REQUIRED | Docker is unavailable in the development sandbox; the compose file must be verified by deployment CI. |
+| Dashboard | DONE | Every view talks to the real RBAC-protected API through a signed session: development bootstrap (`POST /v1/session/bootstrap`, `410` in production) issues the token; upload → queue → report, JSON/PDF export, content-plan CRUD (create plan, add/update items), competitor CRUD, results with the prediction→actual learning loop (`POST /videos/{id}/metrics`), insights derived from the latest report, workspace settings and GDPR erasure all persist to the database. Media signals degrade to labelled `insufficient_data` without FFmpeg; a demo clip is served at `/demo-clip.mp4` for one-click upload testing. |
+| Docker Compose runtime (api, worker, beat, bot, MinIO profile) | EXTERNAL_CREDENTIAL_REQUIRED | Docker is unavailable in the development sandbox; the compose file must be verified by deployment CI. All credentials (`DATABASE_URL`, `POSTGRES_*`, `MINIO_ROOT_*`, `S3_BUCKET`, `S3_ENDPOINT`, …) are interpolated from `.env` with development fallbacks, so a shared deployment no longer needs compose edits. |
 
 ## Explicitly prohibited in production
 

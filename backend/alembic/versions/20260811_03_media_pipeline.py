@@ -54,7 +54,7 @@ def job_columns() -> list[sa.Column]:
         sa.Column('max_attempts', sa.Integer(), nullable=False, server_default='3'),
         sa.Column('error_code', sa.String(64)),
         sa.Column('error', sa.Text()),
-        sa.Column('cancel_requested', sa.Boolean(), nullable=False, server_default=sa.text('0')),
+        sa.Column('cancel_requested', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column('heartbeat_at', sa.DateTime(timezone=True)),
         sa.Column('next_retry_at', sa.DateTime(timezone=True)),
         sa.Column('finished_at', sa.DateTime(timezone=True)),

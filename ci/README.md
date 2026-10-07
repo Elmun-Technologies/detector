@@ -1,30 +1,7 @@
 # Continuous integration
 
-The pipeline definition lives in [`github-actions/ci.yml`](github-actions/ci.yml).
-
-## Why it is not in `.github/workflows/` yet
-
-This branch was produced by the Arena GitHub App, whose installation token does
-not carry the `workflows` permission, so GitHub rejects any push that creates or
-updates a file under `.github/workflows/`:
-
-```text
-refusing to allow a GitHub App to create or update workflow `.github/workflows/ci.yml`
-without `workflows` permission
-```
-
-A maintainer with normal repository rights activates it with one move — the file
-needs no edits:
-
-```bash
-mkdir -p .github/workflows
-git mv ci/github-actions/ci.yml .github/workflows/ci.yml
-git commit -m "ci: activate GitHub Actions pipeline"
-git push
-```
-
-(Alternatively, grant the GitHub App the `workflows` permission and the agent can
-place the file directly.)
+The pipeline definition lives in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) and
+runs on every push and pull request.
 
 ## What the pipeline runs
 
@@ -45,3 +22,10 @@ pytest backend/tests -m "not integration" -q
 pytest backend/tests -m integration -q -rs
 DATABASE_URL=sqlite:///$PWD/ci.db PYTHONPATH=backend alembic upgrade head
 ```
+
+## History
+
+Earlier the pipeline file could not be placed under `.github/workflows/` because
+the token that produced the branch lacked the `workflows` permission. The file
+was activated with `git mv ci/github-actions/ci.yml .github/workflows/ci.yml`
+and needs no further edits.

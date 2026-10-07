@@ -11,10 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .analyzer import check_idea
-from .auth import identity
+from .auth import identity, issue_dev_token
 from .config import settings
-from .database import Base, engine
+from .database import Base, engine, get_db
 from .health import readiness
+from .limits import entitlement
+from .models import User, Workspace, WorkspaceMember
 from .jobs import process_analysis
 from .legacy import development_legacy_only
 from .logging_setup import configure_logging, get_logger, get_request_id
@@ -32,6 +34,9 @@ from .schemas import (
 from .secure_routes import router as secure_router
 from .store import analysis_store
 from .video import VideoValidationError, probe_video, validate_upload
+
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 logger = get_logger('app.main')
@@ -96,6 +101,46 @@ def parse_context(raw_context: str) -> VideoContext:
 @app.get('/v1/auth/session', tags=['auth'])
 async def session_check(user_id: str = Depends(identity)) -> dict[str, str]:
     return {'user_id': user_id}
+
+
+class BootstrapRequest(BaseModel):
+    """Demo workspace profile for the development dashboard."""
+
+    name: str = Field(default='Marketing Ustasi', max_length=160)
+    instagram_username: str = Field(default='marketingustasi', max_length=100)
+    industry: str | None = Field(default='Marketing va SMM', max_length=120)
+    language: str = 'uz'
+
+
+@app.post('/v1/session/bootstrap', status_code=status.HTTP_201_CREATED, tags=['auth'])
+async def bootstrap_session(payload: BootstrapRequest, db: Session = Depends(get_db), _: None = Depends(development_legacy_only)) -> dict:
+    """Development session bootstrap.
+
+    Creates (or reuses) a demo user with an owner workspace and returns a
+    signed token so the dashboard can exercise the real, RBAC-protected API.
+    Refused with ``410`` in production, where identity comes from Telegram
+    WebApp or a signed login flow instead.
+    """
+    user = db.query(User).filter_by(telegram_id='dashboard-demo').first()
+    if user is None:
+        user = User(telegram_id='dashboard-demo', locale=payload.language)
+        db.add(user)
+        db.flush()
+    workspace = db.query(Workspace).filter_by(owner_id=user.id).first()
+    if workspace is None:
+        workspace = Workspace(owner_id=user.id, name=payload.name, industry=payload.industry)
+        db.add(workspace)
+        db.flush()
+        db.add(WorkspaceMember(workspace_id=workspace.id, user_id=user.id, role='owner'))
+    db.commit()
+    db.refresh(workspace)
+    return {
+        'token': issue_dev_token(user.id),
+        'user_id': user.id,
+        'workspace_id': workspace.id,
+        'workspace': {'id': workspace.id, 'name': workspace.name, 'plan': workspace.plan, 'industry': workspace.industry},
+        'limits': entitlement(workspace.plan).__dict__,
+    }
 
 
 @app.get("/health", tags=["system"])

@@ -1,7 +1,11 @@
 services:
   postgres:
     image: postgres:16-alpine
-    environment: { POSTGRES_DB: viral, POSTGRES_USER: viral, POSTGRES_PASSWORD: viral }
+    # Local defaults; override every credential from .env for anything shared.
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-viral}
+      POSTGRES_USER: ${POSTGRES_USER:-viral}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-viral}
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U viral"], interval: 5s, timeout: 3s, retries: 20 }
     volumes: [postgres_data:/var/lib/postgresql/data]
   redis:
@@ -10,33 +14,37 @@ services:
     healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 20 }
     volumes: [redis_data:/data]
   minio:
-    image: minio/minio:latest
+    # MinIO removed its images from Docker Hub (September 2026); default to the
+    # quay.io registry and override via MINIO_IMAGE if needed.
+    image: ${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-10-15T17-29-55Z}
     profiles: [s3]
     command: server /data --console-address :9001
-    environment: { MINIO_ROOT_USER: minioadmin, MINIO_ROOT_PASSWORD: minioadmin }
+    environment: { MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}", MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}" }
     healthcheck: { test: ["CMD", "mc", "ready", "local"], interval: 5s, timeout: 3s, retries: 20 }
     ports: ["9000:9000", "9001:9001"]
     volumes: [minio_data:/data]
   # One-shot bootstrap: private bucket + no anonymous access.
   minio-init:
-    image: minio/mc:latest
+    image: ${MINIO_MC_IMAGE:-quay.io/minio/mc:RELEASE.2025-10-15T17-29-55Z}
     profiles: [s3]
     depends_on: { minio: { condition: service_healthy } }
     entrypoint: >
-      sh -c "mc alias set local http://minio:9000 minioadmin minioadmin &&
-             mc mb --ignore-existing local/viral-media &&
-             mc anonymous set none local/viral-media"
+      sh -c "mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin} &&
+             mc mb --ignore-existing local/${S3_BUCKET:-viral-media} &&
+             mc anonymous set none local/${S3_BUCKET:-viral-media}"
   api:
     build: ./backend
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://viral:viral@postgres:5432/viral
-      REDIS_URL: redis://redis:6379/0
+      # Interpolated from .env / shell so real deployments can set production
+      # credentials without editing this file; the fallbacks match the dev stack.
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-viral}:${POSTGRES_PASSWORD:-viral}@postgres:5432/${POSTGRES_DB:-viral}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       UPLOADS_DIR: /data/uploads
-      QUEUE_MODE: celery
+      QUEUE_MODE: ${QUEUE_MODE:-celery}
       # Used only when STORAGE_BACKEND=s3 (start the compose `s3` profile first).
-      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
       S3_FORCE_PATH_STYLE: "true"
     ports: ["8000:8000"]
     volumes: [viral_uploads:/data/uploads]
@@ -48,11 +56,11 @@ services:
     command: celery -A app.celery_app.celery worker -l info -Q analysis --concurrency 2 --prefetch-multiplier 1
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://viral:viral@postgres:5432/viral
-      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-viral}:${POSTGRES_PASSWORD:-viral}@postgres:5432/${POSTGRES_DB:-viral}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       UPLOADS_DIR: /data/uploads
-      QUEUE_MODE: celery
-      S3_ENDPOINT: http://minio:9000
+      QUEUE_MODE: ${QUEUE_MODE:-celery}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
       S3_FORCE_PATH_STYLE: "true"
     volumes: [viral_uploads:/data/uploads]
     healthcheck: { test: ["CMD-SHELL", "celery -A app.celery_app.celery inspect ping -d celery@$$HOSTNAME"], interval: 30s, timeout: 10s, retries: 5, start_period: 30s }
@@ -63,17 +71,17 @@ services:
     command: celery -A app.celery_app.celery beat -l info
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://viral:viral@postgres:5432/viral
-      REDIS_URL: redis://redis:6379/0
-      QUEUE_MODE: celery
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-viral}:${POSTGRES_PASSWORD:-viral}@postgres:5432/${POSTGRES_DB:-viral}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      QUEUE_MODE: ${QUEUE_MODE:-celery}
     depends_on: { redis: { condition: service_healthy } }
   bot:
     build: ./backend
     command: python -m app.bot
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://viral:viral@postgres:5432/viral
-      REDIS_URL: redis://redis:6379/0
-      QUEUE_MODE: celery
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-viral}:${POSTGRES_PASSWORD:-viral}@postgres:5432/${POSTGRES_DB:-viral}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      QUEUE_MODE: ${QUEUE_MODE:-celery}
     depends_on: [api]
 volumes: { postgres_data: {}, redis_data: {}, minio_data: {}, viral_uploads: {} }

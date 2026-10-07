@@ -159,6 +159,12 @@ def media_tools() -> bool:
     return True
 
 
+@pytest.fixture
+def media_available() -> bool:
+    """Report media tool availability without skipping (tests degrade gracefully)."""
+    return bool(shutil.which(settings.ffmpeg_binary) and shutil.which(settings.ffprobe_binary))
+
+
 def workspace_fixture(db, *, plan: str = 'free', owner_role: str = 'owner'):
     """Create user + workspace + membership and return (user_id, workspace_id)."""
     from app.models import User, Workspace, WorkspaceMember
