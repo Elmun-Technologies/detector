@@ -13,7 +13,7 @@ concurrency:
 # Needed for ci/post_failure.py to comment the log tail on the PR when a step
 # fails (the default token permissions are not guaranteed to include issues).
 permissions:
-  contents: read
+  contents: write
   issues: write
   pull-requests: write
 
@@ -183,15 +183,32 @@ jobs:
         run: |
           # The default shell is 'bash -eo pipefail': without 'set +e' the
           # step dies on the pytest line before the diagnostics can run.
-          echo "::notice title=integration step probe::shell=$0 bash=${BASH_VERSION:-none} pwd=$(pwd)"
           set +e
           pytest backend/tests -m integration -q -rs 2>&1 | tee integration-tests.log
           status=${PIPESTATUS[0]}
-          echo "::notice title=integration after pytest::pytest-exit=$status"
           if [ "$status" != "0" ]; then
-            # Annotation with the log tail: readable via the jobs API even
-            # when PR comment posting is not possible.
-            echo "::error title=Integration profile tests failed::$(tail -c 8000 integration-tests.log | sed -e 's/$/\\n/' | tr -d '\n' | cut -c1-60000)"
+            echo "::error::integration profile tests failed; log tail published to arena/ci-diagnostics"
+            # Reliable channel: commit the log tail to a diagnostics branch.
+            # Skipped when the workflow itself runs on that branch, so the
+            # re-triggered run cannot push again (no infinite loop).
+            if [ "${GITHUB_REF_NAME:-}" != "arena/ci-diagnostics" ]; then
+              {
+                echo "# CI integration failure"
+                echo "run: ${GITHUB_RUN_ID} (${GITHUB_SHA})"
+                echo "date: $(date -u +%FT%TZ)"
+                echo "pytest exit status: ${status}"
+                echo '---------------- log tail ----------------'
+                tail -c 12000 integration-tests.log
+              } > ci-failure.log
+              git config user.name "ci-diagnostics"
+              git config user.email "ci-diagnostics@users.noreply.github.com"
+              git checkout -B arena/ci-diagnostics >/dev/null
+              git add ci-failure.log
+              if ! git diff --cached --quiet; then
+                git commit -m "ci: integration failure log for ${GITHUB_SHA:0:7}" >/dev/null
+                git push -f origin HEAD:arena/ci-diagnostics >/dev/null 2>&1 || true
+              fi
+            fi
             PR="${{ github.event.pull_request.number }}"
             [ -n "$PR" ] || PR=$(gh pr view --json number --jq '.number' 2>/dev/null || echo '')
             python3 ci/post_failure.py "$PR" integration-tests.log
@@ -204,7 +221,25 @@ jobs:
           pytest backend/tests -m "not integration" -q 2>&1 | tee full-suite.log
           status=${PIPESTATUS[0]}
           if [ "$status" != "0" ]; then
-            echo "::error title=Full suite failed::$(tail -c 8000 full-suite.log | sed -e 's/$/\\n/' | tr -d '\n' | cut -c1-60000)"
+            echo "::error::full suite failed; log tail published to arena/ci-diagnostics-full"
+            if [ "${GITHUB_REF_NAME:-}" != "arena/ci-diagnostics-full" ]; then
+              {
+                echo "# CI full-suite failure"
+                echo "run: ${GITHUB_RUN_ID} (${GITHUB_SHA})"
+                echo "date: $(date -u +%FT%TZ)"
+                echo "pytest exit status: ${status}"
+                echo '---------------- log tail ----------------'
+                tail -c 12000 full-suite.log
+              } > full-suite-failure.log
+              git config user.name "ci-diagnostics"
+              git config user.email "ci-diagnostics@users.noreply.github.com"
+              git checkout -B arena/ci-diagnostics-full >/dev/null
+              git add full-suite-failure.log
+              if ! git diff --cached --quiet; then
+                git commit -m "ci: full-suite failure log for ${GITHUB_SHA:0:7}" >/dev/null
+                git push -f origin HEAD:arena/ci-diagnostics-full >/dev/null 2>&1 || true
+              fi
+            fi
             PR="${{ github.event.pull_request.number }}"
             [ -n "$PR" ] || PR=$(gh pr view --json number --jq '.number' 2>/dev/null || echo '')
             python3 ci/post_failure.py "$PR" full-suite.log
